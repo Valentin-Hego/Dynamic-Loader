@@ -11,7 +11,8 @@ INCLUDE_DIR=./include
 # TODO
 # Initialize this variable with a space separated list of the paths to the loader source files (not the library).
 # You can use some make native function such as wildcard if you want.
-SRC_FILES=./src/loader.c ./src/utils.c
+SRC_FILES=./src/isos_trampoline.c
+
 
 # TODO
 # Uncomment this and initialize it to the correct path(s) to your source files if your project sources are not located in `src`.
