@@ -26,4 +26,4 @@ void * loader_plt_resolver(void * handler, int import_id) {
 	/* TODO */
 }
 
-//int main() { return 0; } just to test the CI
+int main() { return 0; } //just to test the CI
