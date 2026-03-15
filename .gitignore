@@ -1,0 +1,5 @@
+isos_loader
+src/env_setup
+src/libfoo.so
+*.o
+*.out

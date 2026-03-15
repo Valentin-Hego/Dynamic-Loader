@@ -1,19 +1,33 @@
-# 
 # This Makefile is for the ISOS project and ensure compatibility with the CI.
 # Make sure to include this file in your root Makefile (i.e., at the top-level of your repository).
 #
+# Répertoire des headers
+INCLUDE_DIR = ./include
 
-# TODO
-# Initialize this variable to point to the directory holding your header if any.
-# Otherwise, the CI will consider the top-level directory.
-INCLUDE_DIR=./include
+# Fichiers sources du loader (utilisés par la CI)
+SRC_FILES = ./src/my_dl.c ./src/isos_loader.c
 
-# TODO
-# Initialize this variable with a space separated list of the paths to the loader source files (not the library).
-# You can use some make native function such as wildcard if you want.
-SRC_FILES=./src/isos_trampoline.c
+# ─── Paramètres de compilation ──────────────────────────────────────────────
+CC      = gcc
+CFLAGS  = -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align \
+          -I$(INCLUDE_DIR)
 
+# ─── Cibles ──────────────────────────────────────────────────────────────────
+.PHONY: all clean
 
-# TODO
-# Uncomment this and initialize it to the correct path(s) to your source files if your project sources are not located in `src`.
-#vpath %.c path/to/src
+all: src/libfoo.so src/env_setup isos_loader
+
+# Compilation de la bibliothèque partagée
+src/libfoo.so: src/libfoo.c
+	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
+
+# Programme de test de l'environment setup
+src/env_setup: src/env_setup.c src/libfoo.so
+	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
+
+# Programme principal isos_loader
+isos_loader: src/isos_loader.c src/my_dl.c
+	$(CC) $(CFLAGS) -rdynamic -o $@ $^ -ldl
+
+clean:
+	rm -f src/libfoo.so src/env_setup isos_loader
