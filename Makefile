@@ -5,7 +5,7 @@
 INCLUDE_DIR = ./include
 
 # Fichiers sources du loader (utilisés par la CI)
-SRC_FILES = ./src/my_dl.c ./src/isos_loader.c
+SRC_FILES = ./src/my_dl.c ./src/isos_loader.c ./src/elf_parser.c
 
 # ─── Paramètres de compilation ──────────────────────────────────────────────
 CC      = gcc
@@ -26,7 +26,7 @@ src/env_setup: src/env_setup.c src/libfoo.so
 	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
 
 # Programme principal isos_loader
-isos_loader: src/isos_loader.c src/my_dl.c
+isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c
 	$(CC) $(CFLAGS) -rdynamic -o $@ $^ -ldl
 
 clean:
