@@ -14,20 +14,18 @@
     4: La taille de notre structure Elf64_Ehdr correspond au champ e_ehsize
     5: Le nombre d’en-têtes de programme (e_phnum) est strictement supérieur à 0
 */
-
-
 int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
-    // ouvre la shared lib en read_only
+
     handle->fd = open(path, O_RDONLY);
     if (handle->fd < 0) {
-        fprintf(stderr, "elf_open_and_check_ehdr: cannot open '%s'\n", path);
+        fprintf(stderr, "%s: cannot open '%s'\n", __func__, path);
         return -1;
     }
 
-    // Lire exactement sizeof(Elf64_Ehdr) octets dans notre structure
+    // Lire exactement sizeof(Elf64_Ehdr) octets dans la structure
     ssize_t n = read(handle->fd, &handle->ehdr, sizeof(handle->ehdr));
     if (n < 0 || (size_t)n < sizeof(handle->ehdr)) {
-        fprintf(stderr, "elf_open_and_check_ehdr: failed to read ELF header from '%s'\n", path);
+        fprintf(stderr, "%s: failed to read ELF header from '%s'\n", __func__, path);
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -35,7 +33,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
     // check 1
     if (memcmp(handle->ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
-        fprintf(stderr, "elf_open_and_check_ehdr: '%s' is not an ELF file\n", path);
+        fprintf(stderr, "%s: '%s' is not an ELF file\n", __func__, path);
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -43,7 +41,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
     // check 2
     if (handle->ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
-        fprintf(stderr, "elf_open_and_check_ehdr: '%s' is not a 64-bit ELF\n", path);
+        fprintf(stderr, "%s: '%s' is not a 64-bit ELF\n", __func__, path);
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -51,7 +49,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
     // check 3
     if (handle->ehdr.e_type != ET_DYN) {
-        fprintf(stderr, "elf_open_and_check_ehdr: '%s' is not a dynamic library (ET_DYN)\n", path);
+        fprintf(stderr, "%s: '%s' is not a dynamic library (ET_DYN)\n", __func__, path);
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -60,9 +58,9 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
     // check 4
     if (sizeof(handle->ehdr) != handle->ehdr.e_ehsize) {
         fprintf(stderr,
-                "elf_open_and_check_ehdr: ehdr size mismatch in '%s' "
+                "%s: ehdr size mismatch in '%s' "
                 "(expected %u, got %zu)\n",
-                path, handle->ehdr.e_ehsize, sizeof(handle->ehdr));
+                __func__, path, handle->ehdr.e_ehsize, sizeof(handle->ehdr));
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -70,7 +68,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
     // check 5
     if (handle->ehdr.e_phnum == 0) {
-        fprintf(stderr, "elf_open_and_check_ehdr: '%s' has no program headers\n", path);
+        fprintf(stderr, "%s: '%s' has no program headers\n", __func__, path);
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -78,8 +76,8 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
     // tout s'est bien passé
     fprintf(stderr,
-            "elf_open_and_check_ehdr: '%s' success "
+            "%s: '%s' success "
             "(%u segment found)\n",
-            path, handle->ehdr.e_phnum);
+            __func__, path, handle->ehdr.e_phnum);
     return 0;
 }

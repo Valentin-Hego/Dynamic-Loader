@@ -1,6 +1,7 @@
 # This Makefile is for the ISOS project and ensure compatibility with the CI.
 # Make sure to include this file in your root Makefile (i.e., at the top-level of your repository).
 #
+
 # Répertoire des headers
 INCLUDE_DIR = ./include
 
@@ -13,8 +14,7 @@ CFLAGS  = -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align
           -I$(INCLUDE_DIR)
 
 # ─── Cibles ──────────────────────────────────────────────────────────────────
-.PHONY: all clean
-
+.PHONY: all clean clang-check
 all: src/libfoo.so src/env_setup isos_loader
 
 # Compilation de la bibliothèque partagée
@@ -29,5 +29,9 @@ src/env_setup: src/env_setup.c src/libfoo.so
 isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c
 	$(CC) $(CFLAGS) -rdynamic -o $@ $^ -ldl
 
+# Clang
+clang-check:
+	clang -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align \
+	-I$(INCLUDE_DIR) -rdynamic --analyze $(SRC_FILES) -ldl
 clean:
 	rm -f src/libfoo.so src/env_setup isos_loader

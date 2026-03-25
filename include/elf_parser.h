@@ -12,6 +12,8 @@ struct dl_handle {
     Elf64_Ehdr  ehdr;   // copie du header de l'executable
 };
 
+// Elf64_Ehdr -> type de elf.h
+
 
 /*
     ouvre la shared library au path, lis son ELF header into handle->ehdr

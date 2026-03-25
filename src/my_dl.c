@@ -19,7 +19,7 @@ void *my_dlopen(const char *path)
         return NULL;
     }
 
-    // alloue avec notre stucture de handle
+    // alloue avec notre stucture de handle (-> calloc tous les champs a 0 + sur)
     struct dl_handle *handle = calloc(1, sizeof(*handle));
     if (!handle) {
         fprintf(stderr, "my_dlopen: out of memory\n");
@@ -27,7 +27,7 @@ void *my_dlopen(const char *path)
     }
     handle->fd = -1;
 
-    // fait les checks
+    // les checks
     if (elf_open_and_check_ehdr(path, handle) < 0) {
         free(handle);
         return NULL;
