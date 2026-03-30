@@ -3,6 +3,7 @@
 
 #include <elf.h>
 #include <stdint.h>
+#include <stddef.h>
 
 /*
     structure pour stocker de handle retourné par my_dlopen()
@@ -10,6 +11,11 @@
 struct dl_handle {
     int         fd;     // file descriptor du .so
     Elf64_Ehdr  ehdr;   // copie du header de l'executable
+
+    // CHALL_3 
+    Elf64_Phdr *load_segs;  // tableau des segments PT_LOAD
+    size_t      load_count; // nombre de PT_LOAD trouvés
+    uint64_t    mem_size;
 };
 
 // Elf64_Ehdr -> type de elf.h
@@ -22,5 +28,11 @@ struct dl_handle {
     Returns : 0 -> success, -1 -> error (mess d'erreurs sur le stderr)
  */
 int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle);
+
+
+/*
+    TODO
+*/
+int elf_find_load_segments(struct dl_handle *handle);
 
 #endif /* ELF_PARSER_H */
