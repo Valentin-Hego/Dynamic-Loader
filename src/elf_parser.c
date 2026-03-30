@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 /*
     Lis le ELF header du fichier et fait les checks du chall_2 :
@@ -80,4 +81,131 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
             "(%u segment found)\n",
             __func__, path, handle->ehdr.e_phnum);
     return 0;
+}
+
+
+
+/*
+    Challenge 3 : trouve les segments PT_LOAD et effectue les 4 vérifications.
+ 
+    Étapes :
+      1. Vérifier que sizeof(Elf64_Phdr) == handle->ehdr.e_phentsize
+      2. Lire tous les program headers depuis le fichier
+      3. Filtrer les PT_LOAD dans un tableau dynamique
+      4. Check 1 : au moins un PT_LOAD
+      5. Check 2 : le premier PT_LOAD couvre la zone des program headers
+                   (p_offset <= e_phoff && p_offset + p_filesz >= e_phoff + phnum * phentsize)
+      6. Check 3 : ordre croissant de p_vaddr
+      7. Check 4 : pas de chevauchement (vaddr[i] + memsz[i] <= vaddr[i+1])
+      8. Calcule mem_size = last.p_vaddr + last.p_memsz - first.p_vaddr
+*/
+int elf_find_load_segments(struct dl_handle *handle){
+    Elf64_Ehdr *ehdr = &handle->ehdr;
+
+    // Make sure that the size of your phdr is equal to the field phentsize in the ehdr.
+    if (sizeof(Elf64_Phdr) != ehdr->e_phentsize){
+        fprintf(stderr, "phdr size problem\n");
+        return -1;
+    }
+
+
+    //allocation d'un tableau pour lire tous les program headers du fichier
+    int nb_segments = ehdr->e_phnum;
+    int size_phdr = sizeof(Elf64_Phdr);
+    int total_size = nb_segments * size_phdr;
+ 
+    Elf64_Phdr *all_phdrs = malloc(total_size);
+    if (all_phdrs == NULL) {
+        fprintf(stderr, "%s: failed allocation\n", __func__);
+        return -1;
+    }
+
+
+    //on place le curseur au bon endroit :
+    if (lseek(handle->fd, (off_t)handle->ehdr.e_phoff, SEEK_SET) < 0) {
+        fprintf(stderr, "%s: cursor positionning error\n", __func__);
+        free(all_phdrs);
+        return -1;
+    }
+ 
+    ssize_t octets_lus = read(handle->fd, all_phdrs, total_size);
+    if (octets_lus < 0 || octets_lus < total_size) {
+        fprintf(stderr, "%s: headers reading failed\n", __func__);
+        free(all_phdrs);
+        return -1;
+    }
+
+    //parcourir tous les segments et ne garder que les PT_LOAD
+    Elf64_Phdr *load_segs = malloc(nb_segments * size_phdr);
+    if (load_segs == NULL){
+        fprintf(stderr, "%s: failed allocation\n", __func__);
+        free(all_phdrs);
+        return -1;
+    }
+
+    size_t load_count = 0; //nb de PT_LOAD trouvés
+    
+    for (int i = 0; i < nb_segments; i++) {
+        if (all_phdrs[i].p_type == PT_LOAD) {
+            load_segs[load_count] = all_phdrs[i]; // copie du segment
+            load_count++;
+        }
+    }
+    free(all_phdrs);
+    
+    
+    //check : The DL library has at least one load segment.
+    if(load_count == 0){
+        fprintf(stderr, "%s: no PT_LOAD segment found\n", __func__);
+        free(load_segs);
+        return -1;
+    }
+
+    //check : The first load segment spans over all segment headers.
+    // p_offset <= e_phoff  ET  p_offset + p_filesz >= e_phoff + (phnum * phentsize)
+    uint64_t ph_table_start = ehdr->e_phoff;
+    uint64_t ph_table_end   = ehdr->e_phoff + (uint64_t)ehdr->e_phnum * ehdr->e_phentsize;
+    uint64_t seg0_start     = load_segs[0].p_offset;
+    uint64_t seg0_end       = load_segs[0].p_offset + load_segs[0].p_filesz;
+    
+    if (seg0_start > ph_table_start || seg0_end < ph_table_end) {
+        fprintf(stderr,
+                "%s: first PT_LOAD does not span program headers table\n", __func__);
+        free(load_segs);
+        return -1;
+    }
+
+
+    //check : The PT_LOAD segments are in ascending order of p_vaddr. 
+    for (size_t i = 1; i < load_count; i++) {
+        if (load_segs[i].p_vaddr <= load_segs[i - 1].p_vaddr) {
+            fprintf(stderr, "%s: PT_LOAD segments are not in ascending order of p_vaddr\n", __func__);
+            free(load_segs);
+            return -1;
+        }
+    }    
+
+
+    //check : The PT_LOAD segments do not overlap.
+    for (size_t i = 0; i + 1 < load_count; i++) {
+        uint64_t end_i = load_segs[i].p_vaddr + load_segs[i].p_memsz;
+        if (end_i > load_segs[i + 1].p_vaddr) {
+            fprintf(stderr, "%s: deux segments PT_LOAD se chevauchent en mémoire\n", __func__);            
+            free(load_segs);
+            return -1;
+        }
+    }
+
+
+    //Compute the total memory size between the first PT_LOAD and the end of the last PT_LOAD
+    uint64_t mem_size = (load_segs[load_count - 1].p_vaddr + load_segs[load_count - 1].p_memsz) - load_segs[0].p_vaddr;
+
+    //les results -> dans le handle
+    handle->load_segs  = load_segs;
+    handle->load_count = load_count;
+    handle->mem_size   = mem_size;
+
+    fprintf(stderr, "%s: found %zu PT_LOAD segments, total mem size = 0x%lx\n", __func__, load_count, (unsigned long)mem_size);
+    return 0;
+
 }

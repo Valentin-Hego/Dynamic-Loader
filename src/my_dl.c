@@ -27,8 +27,14 @@ void *my_dlopen(const char *path)
     }
     handle->fd = -1;
 
-    // les checks
+    // open header + les checks du chall 2
     if (elf_open_and_check_ehdr(path, handle) < 0) {
+        free(handle);
+        return NULL;
+    }
+
+    // challenge 3 : Find the PT_LOAD segments
+    if (elf_find_load_segments(handle) < 0) {
         free(handle);
         return NULL;
     }

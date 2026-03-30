@@ -5,7 +5,7 @@
 
 
 //options découvertes d'argp
-const char *argp_program_version = "isos_loader chall 1.0";
+const char *argp_program_version = "isos_loader chall 3.0";
 const char *argp_program_bug_address = "<valentin.hego@univ-rennes.fr.com>";
 
 static char doc[] = "isos_loader -- load an ELF shared library and call its functions\v"
