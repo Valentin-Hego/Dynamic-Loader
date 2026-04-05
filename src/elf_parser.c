@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <sys/mman.h>
 
 /*
     Lis le ELF header du fichier et fait les checks du chall_2 :
@@ -93,8 +94,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
       2. Lire tous les program headers depuis le fichier
       3. Filtrer les PT_LOAD dans un tableau dynamique
       4. Check 1 : au moins un PT_LOAD
-      5. Check 2 : le premier PT_LOAD couvre la zone des program headers
-                   (p_offset <= e_phoff && p_offset + p_filesz >= e_phoff + phnum * phentsize)
+      5. Check 2 : le premier PT_LOAD couvre la zone des program headers (p_offset <= e_phoff && p_offset + p_filesz >= e_phoff + phnum * phentsize)
       6. Check 3 : ordre croissant de p_vaddr
       7. Check 4 : pas de chevauchement (vaddr[i] + memsz[i] <= vaddr[i+1])
       8. Calcule mem_size = last.p_vaddr + last.p_memsz - first.p_vaddr
@@ -209,3 +209,62 @@ int elf_find_load_segments(struct dl_handle *handle){
     return 0;
 
 }
+
+/*
+ * Charge les segments PT_LOAD d'un ELF en mémoire.
+ * On réserve d'abord toute la plage pour garantir la contiguïté,
+ * puis on "écrase" les zones avec les mappings du fichier.
+ */
+ int seg_load_mem(struct dl_handle *h)
+ {
+     if (!h || !h->load_segs || !h->load_count)
+         return -1;
+ 
+     size_t psz = (size_t)sysconf(_SC_PAGESIZE);
+ 
+     // arrondi au multiple de page supérieur pour absorber les align_off de chaque segment
+     size_t total = (h->mem_size + psz - 1) & ~(psz - 1);
+ 
+     // Réservation initiale : on prend toute la place d'un coup
+     void *map = mmap(NULL, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+     if (map == MAP_FAILED) {
+         perror("mmap_reserve");
+         return -1;
+     }
+ 
+     // Le 'load bias' : différence entre l'adresse virtuelle ELF et l'adresse réelle
+     h->base_addr = (char *)map - h->load_segs[0].p_vaddr;
+ 
+     for (size_t i = 0; i < h->load_count; i++) {
+         Elf64_Phdr *s = &h->load_segs[i];
+ 
+         // Mapping des flags : simple et direct
+         int prot = ((s->p_flags & PF_R) ? PROT_READ  : 0) |
+                    ((s->p_flags & PF_W) ? PROT_WRITE : 0) |
+                    ((s->p_flags & PF_X) ? PROT_EXEC  : 0);
+ 
+         // Alignement sur les pages (indispensable pour mmap)
+         uintptr_t align_off = s->p_vaddr % psz;
+         void     *addr      = (char *)h->base_addr + (s->p_vaddr - align_off);
+         size_t    len       = s->p_filesz + align_off;
+         off_t     offset    = (off_t)(s->p_offset - align_off);
+ 
+         if (mmap(addr, len, prot, MAP_PRIVATE | MAP_FIXED, h->fd, offset) == MAP_FAILED) {
+             perror("mmap_segment");
+             goto err_cleanup;
+         }
+ 
+         // Nettoyage de la zone BSS (mémoire non initialisée)
+         if (s->p_memsz > s->p_filesz) {
+             void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz;
+             memset(bss_ptr, 0, s->p_memsz - s->p_filesz);
+         }
+     }
+ 
+     return 0;
+ 
+ err_cleanup:
+     h->base_addr = NULL;
+     munmap(map, total);
+     return -1;
+ }

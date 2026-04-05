@@ -39,6 +39,12 @@ void *my_dlopen(const char *path)
         return NULL;
     }
 
+    // chall_4 : mapping des segments PT_LOAD en mémoire
+    if (seg_load_mem(handle) < 0) {
+        free(handle);
+        return NULL;
+    }
+
     return handle;
 }
 
