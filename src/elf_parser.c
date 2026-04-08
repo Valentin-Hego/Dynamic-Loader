@@ -211,61 +211,85 @@ int elf_find_load_segments(struct dl_handle *handle){
 }
 
 
+
 /*
     Charge les segments PT_LOAD d'un ELF en mémoire.
-    On réserve d'abord toute la plage pour garantir la contiguité,
-    puis on écrase les zones avec les mappings du fichier.
- */
- int seg_load_mem(struct dl_handle *h)
- {
-     if (!h || !h->load_segs || !h->load_count)
-         return -1;
+    On réserve d'abord toute la plage pour garantir la contiguïté,
+    puis on "écrase" les zones avec les mappings du fichier.
+*/
+ int seg_load_mem(struct dl_handle *h) {
+
+    if (h == NULL || h->load_segs == NULL || h->load_count == 0){
+        return -1;
+    }
+    
+    //taille d'une page -> en général = 4096
+    size_t psz = (size_t)sysconf(_SC_PAGESIZE);
+    // arrondi au multiple de page supérieur
+    // mmap exige nb entiers de page et pages allignées
+    // comme ça le dernier segment ne peut pas deborder sur la page
+    size_t total = (h->mem_size + psz - 1) & ~(psz - 1);
  
-     size_t psz = (size_t)sysconf(_SC_PAGESIZE);
+    // Réservation initiale : on prend toute la place d'un coup
+    void *map = mmap((void *)0x00, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (map == MAP_FAILED) {
+        perror("mmap_reserve");
+        return -1;
+    }
  
-     // arrondi au multiple de page supérieur pour absorber les align_off de chaque segment
-     size_t total = (h->mem_size + psz - 1) & ~(psz - 1);
-     void *map = mmap(NULL, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-     if (map == MAP_FAILED) {
-         perror("mmap_reserve");
-         return -1;
-     }
+    // différence entre l'adresse virtuelle ELF et l'adresse réelle
+    h->base_addr = (char *)map - h->load_segs[0].p_vaddr;
+    fprintf(stderr, "%s: reserved %zu bytes at %p, base_addr=%p\n", __func__, total, map, h->base_addr);
  
-     // différence entre l'adresse virtuelle ELF et l'adresse réel
-     h->base_addr = (char *)map - h->load_segs[0].p_vaddr;
-     fprintf(stderr, "%s: reserved %zu bytes at %p, base_addr=%p\n", __func__, total, map, h->base_addr);
+    // boucle 1 : mapper chaque segment depuis le fichier
+    for (size_t i = 0; i < h->load_count; i++) {
+        Elf64_Phdr *s = &h->load_segs[i];
  
-     for (size_t i = 0; i < h->load_count; i++) {
-         Elf64_Phdr *s = &h->load_segs[i];
-          int prot = ((s->p_flags & PF_R) ? PROT_READ  : 0) |
-                    ((s->p_flags & PF_W) ? PROT_WRITE : 0) |
-                    ((s->p_flags & PF_X) ? PROT_EXEC  : 0);
+        // alignement sur les pages
+        uintptr_t align_off = s->p_vaddr % psz; //l'exces potentiel 
+        void *addr = (char *)h->base_addr + (s->p_vaddr - align_off); //on recule l'addresse 
+        size_t len = s->p_filesz + align_off;
+        off_t offset = (off_t)(s->p_offset - align_off);
  
-         //alignement sur les pages
-         uintptr_t align_off = s->p_vaddr % psz;
-         void *addr = (char *)h->base_addr + (s->p_vaddr - align_off);
-         size_t len = s->p_filesz + align_off;
-         off_t offset = (off_t)(s->p_offset - align_off);
+        if (mmap(addr, len, PROT_WRITE, MAP_PRIVATE | MAP_FIXED, h->fd, offset) == MAP_FAILED) {
+            perror("mmap_segment");
+            goto err_cleanup;
+        }
+        fprintf(stderr, "%s: segment %zu mapped at %p (filesz=0x%lx, memsz=0x%lx)\n", __func__, i, (char *)h->base_addr + s->p_vaddr, (unsigned long)s->p_filesz, (unsigned long)s->p_memsz);
  
-         if (mmap(addr, len, prot, MAP_PRIVATE | MAP_FIXED, h->fd, offset) == MAP_FAILED) {
-             perror("mmap_segment");
-             goto err_cleanup;
-         }
-         fprintf(stderr, "%s: segment %zu mapped at %p (prot=%d, filesz=0x%lx, memsz=0x%lx)\n", __func__, i, (char *)h->base_addr + s->p_vaddr, prot, (unsigned long)s->p_filesz, (unsigned long)s->p_memsz);
+        // nettoyage de la zone BSS (mémoire non initialisée)
+        if (s->p_memsz > s->p_filesz) { //si la mem reservée est plus grande que ce que l'on a besoin
+            void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz; //là que BSS commence
+            memset(bss_ptr, 0, s->p_memsz - s->p_filesz); //rempli la fin de 0 pour eviter le garbage
+            fprintf(stderr, "%s: BSS zeroed at %p (%zu bytes)\n", __func__, bss_ptr, s->p_memsz - s->p_filesz);
+        }
+    }
  
-         // nettoyage de la zone BSS (mémoire non initialisée)
-         if (s->p_memsz > s->p_filesz) {
-             void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz;
-             memset(bss_ptr, 0, s->p_memsz - s->p_filesz);
-             fprintf(stderr, "%s: BSS zeroed at %p (%zu bytes)\n", __func__, bss_ptr, s->p_memsz - s->p_filesz);
-         }
-     }
+    // boucle 2 : appliquer les vraies permissions avec mprotect
+    // longueur basée sur p_memsz pour couvrir la BSS
+    for (size_t i = 0; i < h->load_count; i++) {
+        Elf64_Phdr *s = &h->load_segs[i];
  
-     fprintf(stderr, "%s: library fully mapped at base_addr=%p\n", __func__, h->base_addr);
-     return 0;
+        int prot = ((s->p_flags & PF_R) ? PROT_READ  : 0) |
+                   ((s->p_flags & PF_W) ? PROT_WRITE : 0) |
+                   ((s->p_flags & PF_X) ? PROT_EXEC  : 0);
+ 
+        uintptr_t align_off = s->p_vaddr % psz;
+        void *addr = (char *)h->base_addr + (s->p_vaddr - align_off);
+        size_t len = s->p_memsz + align_off;
+ 
+        if (mprotect(addr, len, prot) < 0) {
+            perror("mprotect");
+            goto err_cleanup;
+        }
+        fprintf(stderr, "%s: segment %zu mprotect at %p (prot=%d)\n", __func__, i, (char *)h->base_addr + s->p_vaddr, prot);
+    }
+ 
+    fprintf(stderr, "%s: library fully mapped at base_addr=%p\n", __func__, h->base_addr);
+    return 0;
  
  err_cleanup:
-     h->base_addr = NULL;
-     munmap(map, total);
-     return -1;
+    h->base_addr = NULL;
+    munmap(map, total);
+    return -1;
  }
