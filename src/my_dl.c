@@ -27,7 +27,7 @@ void *my_dlopen(const char *path)
     }
     handle->fd = -1;
 
-    // open header + les checks du chall 2
+    // chall 2
     if (elf_open_and_check_ehdr(path, handle) < 0) {
         free(handle);
         return NULL;
@@ -44,6 +44,13 @@ void *my_dlopen(const char *path)
         free(handle);
         return NULL;
     }
+
+    // chall 5 : dynamic relocations
+    if (relocations(handle)< 0) {
+        free(handle);
+        return NULL;
+    }
+
 
     return handle;
 }

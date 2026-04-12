@@ -227,10 +227,10 @@ int elf_find_load_segments(struct dl_handle *handle){
     size_t psz = (size_t)sysconf(_SC_PAGESIZE);
     // arrondi au multiple de page supérieur
     // mmap exige nb entiers de page et pages allignées
-    // comme ça le dernier segment ne peut pas deborder sur la page
     size_t total = (h->mem_size + psz - 1) & ~(psz - 1);
- 
-    // Réservation initiale : on prend toute la place d'un coup
+
+
+    // Réservation initiale on prend toute la place d'un coup
     void *map = mmap((void *)0x00, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (map == MAP_FAILED) {
         perror("mmap_reserve");
@@ -241,7 +241,7 @@ int elf_find_load_segments(struct dl_handle *handle){
     h->base_addr = (char *)map - h->load_segs[0].p_vaddr;
     fprintf(stderr, "%s: reserved %zu bytes at %p, base_addr=%p\n", __func__, total, map, h->base_addr);
  
-    // boucle 1 : mapper chaque segment depuis le fichier
+    // boucle 1 : mappe chaque segment depuis le fichier
     for (size_t i = 0; i < h->load_count; i++) {
         Elf64_Phdr *s = &h->load_segs[i];
  
@@ -257,7 +257,7 @@ int elf_find_load_segments(struct dl_handle *handle){
         }
         fprintf(stderr, "%s: segment %zu mapped at %p (filesz=0x%lx, memsz=0x%lx)\n", __func__, i, (char *)h->base_addr + s->p_vaddr, (unsigned long)s->p_filesz, (unsigned long)s->p_memsz);
  
-        // nettoyage de la zone BSS (mémoire non initialisée)
+        // nettoyage de la zone du BSS
         if (s->p_memsz > s->p_filesz) { //si la mem reservée est plus grande que ce que l'on a besoin
             void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz; //là que BSS commence
             memset(bss_ptr, 0, s->p_memsz - s->p_filesz); //rempli la fin de 0 pour eviter le garbage
@@ -293,3 +293,73 @@ int elf_find_load_segments(struct dl_handle *handle){
     munmap(map, total);
     return -1;
  }
+
+
+
+ /*
+    Challenge 5 : Dynamic relocations
+    Le but est de corriger les adresses dans le binaire chargé car il n'est pas 
+    à son adresse de base prévue à la compilation.
+*/
+int relocations(struct dl_handle *handle) {
+    Elf64_Dyn *dyn_table = NULL;
+    Elf64_Rela *rela_table = NULL;
+    size_t rela_size = 0;
+    size_t rela_ent_size = 0;
+
+    //trouver le segment dynamic
+    Elf64_Phdr *phdrs = (Elf64_Phdr *)((char *)handle->base_addr + handle->ehdr.e_phoff);
+    for (int i = 0; i < handle->ehdr.e_phnum; i++) {
+        if (phdrs[i].p_type == PT_DYNAMIC) {
+            dyn_table = (Elf64_Dyn *)((char *)handle->base_addr + phdrs[i].p_vaddr);
+            break;
+        }
+    }
+
+    //si aucune var glob ou dépendances raf (rien à faire)
+    if (dyn_table == NULL) {
+        return 0;
+    }
+
+    // recherche les entrées RELA dans la table dynamique
+    for (int i = 0; dyn_table[i].d_tag != DT_NULL; i++) {
+        if (dyn_table[i].d_tag == DT_RELA)
+            rela_table = (Elf64_Rela *)((char *)handle->base_addr + dyn_table[i].d_un.d_ptr);
+        else if (dyn_table[i].d_tag == DT_RELASZ)
+            rela_size = dyn_table[i].d_un.d_val;
+        else if (dyn_table[i].d_tag == DT_RELAENT)
+            rela_ent_size = dyn_table[i].d_un.d_val;
+    }
+
+    if (rela_table == NULL || rela_ent_size == 0){
+        return 0;
+    } 
+
+
+    int num_relocs = rela_size / rela_ent_size;
+    long psz = sysconf(_SC_PAGESIZE);
+
+    // boucle sur toutes les entrées
+    for (int i = 0; i < num_relocs; i++) {
+        Elf64_Rela *curr = (Elf64_Rela *)((char *)rela_table + (i * rela_ent_size));
+        if (ELF64_R_TYPE(curr->r_info) == R_X86_64_RELATIVE) {
+            //l'endroit à corriger
+            void *target_addr = (char *)handle->base_addr + curr->r_offset;
+            // où le mettre
+            uint64_t final_val = (uint64_t)handle->base_addr + curr->r_addend;
+
+            // meme principe que chall 4 mprotect travaille par pages 
+            uintptr_t page_start = (uintptr_t)target_addr & ~(psz - 1);
+            if (mprotect((void *)page_start, psz, PROT_READ | PROT_WRITE) < 0) {
+                perror("mprotect (reloc start)");
+                return -1;
+            }
+
+            // on applique la relocation
+            *(uint64_t *)target_addr = final_val;
+        }
+    }
+
+    fprintf(stderr, "%s: Applied %d relative relocations\n", __func__, num_relocs);
+    return 0;
+}

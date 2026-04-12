@@ -15,7 +15,7 @@ struct dl_handle {
     // CHALL_3 
     Elf64_Phdr *load_segs;  // tableau des segments PT_LOAD
     size_t      load_count; // nombre de PT_LOAD trouvés
-    uint64_t    mem_size;
+    uint64_t    mem_size;   // taille memoire
 
     // chall 4
     void *base_addr; // addresse de base du mapping en mémoire
@@ -42,5 +42,9 @@ int elf_find_load_segments(struct dl_handle *handle);
 */
 int seg_load_mem(struct dl_handle *handle);
 
+/*
+    relocate the symbols by looking into the .rela.dyn section
+*/
+int relocations(struct dl_handle *handle);
 
 #endif /* ELF_PARSER_H */
