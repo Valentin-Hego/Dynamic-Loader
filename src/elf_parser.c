@@ -296,7 +296,8 @@ int elf_find_load_segments(struct dl_handle *handle){
 
 
 
- /*
+
+/*
     Challenge 5 : Dynamic relocations
     Le but est de corriger les adresses dans le binaire chargé car il n'est pas 
     à son adresse de base prévue à la compilation.
@@ -307,7 +308,7 @@ int relocations(struct dl_handle *handle) {
     size_t rela_size = 0;
     size_t rela_ent_size = 0;
 
-    //trouver le segment dynamic
+    // trouver le segment dynamic
     Elf64_Phdr *phdrs = (Elf64_Phdr *)((char *)handle->base_addr + handle->ehdr.e_phoff);
     for (int i = 0; i < handle->ehdr.e_phnum; i++) {
         if (phdrs[i].p_type == PT_DYNAMIC) {
@@ -316,7 +317,7 @@ int relocations(struct dl_handle *handle) {
         }
     }
 
-    //si aucune var glob ou dépendances raf (rien à faire)
+    // si aucune var glob ou dépendances raf (rien à faire)
     if (dyn_table == NULL) {
         return 0;
     }
@@ -331,10 +332,9 @@ int relocations(struct dl_handle *handle) {
             rela_ent_size = dyn_table[i].d_un.d_val;
     }
 
-    if (rela_table == NULL || rela_ent_size == 0){
+    if (rela_table == NULL || rela_ent_size == 0) {
         return 0;
-    } 
-
+    }
 
     int num_relocs = rela_size / rela_ent_size;
     long psz = sysconf(_SC_PAGESIZE);
@@ -342,13 +342,35 @@ int relocations(struct dl_handle *handle) {
     // boucle sur toutes les entrées
     for (int i = 0; i < num_relocs; i++) {
         Elf64_Rela *curr = (Elf64_Rela *)((char *)rela_table + (i * rela_ent_size));
-        if (ELF64_R_TYPE(curr->r_info) == R_X86_64_RELATIVE) {
-            //l'endroit à corriger
-            void *target_addr = (char *)handle->base_addr + curr->r_offset;
-            // où le mettre
-            uint64_t final_val = (uint64_t)handle->base_addr + curr->r_addend;
 
-            // meme principe que chall 4 mprotect travaille par pages 
+        if (ELF64_R_TYPE(curr->r_info) == R_X86_64_RELATIVE) {
+            void *target_addr = (char *)handle->base_addr + curr->r_offset; //l'addresse a corriger
+            uint64_t final_val = (uint64_t)handle->base_addr + curr->r_addend; //la correction
+
+            // cherche le segment PT_LOAD qui contient target_addr
+            // pour savoir si on doit faire un mprotect temporaire
+            int orig_prot = PROT_READ | PROT_WRITE; // défaut si segment non trouvé
+            int modif_prot = 0;
+
+            for (size_t j = 0; j < handle->load_count; j++) {
+                Elf64_Phdr *seg = &handle->load_segs[j];
+                void *seg_start = (char *)handle->base_addr + seg->p_vaddr;
+                void *seg_end   = (char *)seg_start + seg->p_memsz;
+
+                if (target_addr >= seg_start && target_addr < seg_end) {
+                    // reconstruire le prot d'origine
+                    orig_prot = ((seg->p_flags & PF_R) ? PROT_READ  : 0) |
+                                ((seg->p_flags & PF_W) ? PROT_WRITE : 0) |
+                                ((seg->p_flags & PF_X) ? PROT_EXEC  : 0);
+
+                    // mprotect seulement si le segment n'est pas déjà writable
+                    if (!(seg->p_flags & PF_W))
+                        modif_prot = 1;
+                    break;
+                }
+            }
+
+            // meme principe que chall 4 mprotect travaille par pages
             uintptr_t page_start = (uintptr_t)target_addr & ~(psz - 1);
             if (mprotect((void *)page_start, psz, PROT_READ | PROT_WRITE) < 0) {
                 perror("mprotect (reloc start)");
@@ -357,6 +379,14 @@ int relocations(struct dl_handle *handle) {
 
             // on applique la relocation
             *(uint64_t *)target_addr = final_val;
+
+            // restaure les permissions d'origine si le segment était read-only
+            if (modif_prot) {
+                if (mprotect((void *)page_start, psz, orig_prot) < 0) {
+                    perror("mprotect (reloc restore)");
+                    return -1;
+                }
+            }
         }
     }
 
