@@ -318,9 +318,8 @@ int relocations(struct dl_handle *handle) {
     }
 
     // si aucune var glob ou dépendances raf (rien à faire)
-    if (dyn_table == NULL) {
+    if (dyn_table == NULL)
         return 0;
-    }
 
     // recherche les entrées RELA dans la table dynamique
     for (int i = 0; dyn_table[i].d_tag != DT_NULL; i++) {
@@ -332,64 +331,65 @@ int relocations(struct dl_handle *handle) {
             rela_ent_size = dyn_table[i].d_un.d_val;
     }
 
-    if (rela_table == NULL || rela_ent_size == 0) {
+    if (rela_table == NULL || rela_ent_size == 0)
         return 0;
-    }
 
-    int num_relocs = rela_size / rela_ent_size;
+    int num_relocs = (int)(rela_size / rela_ent_size);
     long psz = sysconf(_SC_PAGESIZE);
 
     // boucle sur toutes les entrées
     for (int i = 0; i < num_relocs; i++) {
         Elf64_Rela *curr = (Elf64_Rela *)((char *)rela_table + (i * rela_ent_size));
+        uint32_t type = ELF64_R_TYPE(curr->r_info); // dans sujet les rela peuvent etres soit R_X86_64_RELATIVE soit R_X86_64_RELATIVE (oublie chall 5)
 
-        if (ELF64_R_TYPE(curr->r_info) == R_X86_64_RELATIVE) {
-            void *target_addr = (char *)handle->base_addr + curr->r_offset; //l'addresse a corriger
-            uint64_t final_val = (uint64_t)handle->base_addr + curr->r_addend; //la correction
+        void *target_addr = (char *)handle->base_addr + curr->r_offset; //l'addr a corriger
+        uint64_t final_val = 0;
 
-            // cherche le segment PT_LOAD qui contient target_addr
-            // pour savoir si on doit faire un mprotect temporaire
-            int orig_prot = PROT_READ | PROT_WRITE; // défaut si segment non trouvé
-            int modif_prot = 0;
+        if (type == R_X86_64_RELATIVE || type == R_X86_64_64) { //chall5 oublie du ou -> pb au chall6
+            // adresse = base + addend 
+            final_val = (uint64_t)handle->base_addr + (uint64_t)curr->r_addend; //la corrextion
+        }
 
-            for (size_t j = 0; j < handle->load_count; j++) {
-                Elf64_Phdr *seg = &handle->load_segs[j];
-                void *seg_start = (char *)handle->base_addr + seg->p_vaddr;
-                void *seg_end   = (char *)seg_start + seg->p_memsz;
+        // mprotect temporaire si la page n'est pas writable
+        int modif_prot = 0;
+        int orig_prot  = PROT_READ | PROT_WRITE;
 
-                if (target_addr >= seg_start && target_addr < seg_end) {
-                    // reconstruire le prot d'origine
-                    orig_prot = ((seg->p_flags & PF_R) ? PROT_READ  : 0) |
-                                ((seg->p_flags & PF_W) ? PROT_WRITE : 0) |
-                                ((seg->p_flags & PF_X) ? PROT_EXEC  : 0);
+        for (size_t j = 0; j < handle->load_count; j++) {
+            Elf64_Phdr *seg = &handle->load_segs[j];
+            void *seg_start = (char *)handle->base_addr + seg->p_vaddr;
+            void *seg_end   = (char *)seg_start + seg->p_memsz;
 
-                    // mprotect seulement si le segment n'est pas déjà writable
-                    if (!(seg->p_flags & PF_W))
-                        modif_prot = 1;
-                    break;
-                }
+            if (target_addr >= seg_start && target_addr < seg_end) {
+                // reconstruire le prot d'origine
+                orig_prot = ((seg->p_flags & PF_R) ? PROT_READ  : 0) |
+                            ((seg->p_flags & PF_W) ? PROT_WRITE : 0) |
+                            ((seg->p_flags & PF_X) ? PROT_EXEC  : 0);
+                // mprotect seulement si le segment n'est pas déjà writable            
+                if (!(seg->p_flags & PF_W))
+                    modif_prot = 1;
+                break;
             }
+        }
 
-            // meme principe que chall 4 mprotect travaille par pages
-            uintptr_t page_start = (uintptr_t)target_addr & ~(psz - 1);
-            if (mprotect((void *)page_start, psz, PROT_READ | PROT_WRITE) < 0) {
-                perror("mprotect (reloc start)");
+        // meme principe que chall 4 mprotect travaille par pages
+        uintptr_t page_start = (uintptr_t)target_addr & ~((uintptr_t)psz - 1);
+        if (mprotect((void *)page_start, (size_t)psz, PROT_READ | PROT_WRITE) < 0) {
+            perror("mprotect (reloc start)");
+            return -1;
+        }
+        
+        // on applique la relocation
+        *(uint64_t *)target_addr = final_val;
+
+        // restaure les permissions d'origine si le segment était read-only
+        if (modif_prot) {
+            if (mprotect((void *)page_start, (size_t)psz, orig_prot) < 0) {
+                perror("mprotect (reloc restore)");
                 return -1;
-            }
-
-            // on applique la relocation
-            *(uint64_t *)target_addr = final_val;
-
-            // restaure les permissions d'origine si le segment était read-only
-            if (modif_prot) {
-                if (mprotect((void *)page_start, psz, orig_prot) < 0) {
-                    perror("mprotect (reloc restore)");
-                    return -1;
-                }
             }
         }
     }
 
-    fprintf(stderr, "%s: Applied %d relative relocations\n", __func__, num_relocs);
+    fprintf(stderr, "relocations: Applied %d relocations\n", num_relocs);
     return 0;
 }

@@ -15,15 +15,18 @@ CFLAGS  = -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align
 
 # ─── Cibles ──────────────────────────────────────────────────────────────────
 .PHONY: all clean clang-check
-all: src/libfoo.so src/env_setup isos_loader
+all: src/libfoo.so isos_loader #src/env_setup
 
-# Compilation de la bibliothèque partagée
+# Compilation de la bibliothèque partagée (modif chall6)
+#on compile la lib avec -Wl,-e,my_symbols pour que e_entry pointe sur notre table de symboles custom
 src/libfoo.so: src/libfoo.c
-	$(CC) $(CFLAGS) -shared -fPIC -o $@ $<
+	$(CC) -nostdlib -fPIC -shared -fvisibility=hidden \
+		-Wl,-e,my_symbols \
+		-o $@ $<
 
-# Programme de test de l'environment setup
-src/env_setup: src/env_setup.c src/libfoo.so
-	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
+# Programme de test de l'environment setup -> casse le chall6 donc commenté
+#src/env_setup: src/env_setup.c src/libfoo.so
+#	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
 
 # Programme principal isos_loader
 isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c
