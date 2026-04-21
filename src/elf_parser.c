@@ -28,32 +28,28 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
     ssize_t n = read(handle->fd, &handle->ehdr, sizeof(handle->ehdr));
     if (n < 0 || (size_t)n < sizeof(handle->ehdr)) {
         fprintf(stderr, "%s: failed to read ELF header from '%s'\n", __func__, path);
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
     // check 1
     if (memcmp(handle->ehdr.e_ident, ELFMAG, SELFMAG) != 0) {
         fprintf(stderr, "%s: '%s' is not an ELF file\n", __func__, path);
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
     // check 2
     if (handle->ehdr.e_ident[EI_CLASS] != ELFCLASS64) {
         fprintf(stderr, "%s: '%s' is not a 64-bit ELF\n", __func__, path);
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
     // check 3
     if (handle->ehdr.e_type != ET_DYN) {
         fprintf(stderr, "%s: '%s' is not a dynamic library (ET_DYN)\n", __func__, path);
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
@@ -63,25 +59,25 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
                 "%s: ehdr size mismatch in '%s' "
                 "(expected %u, got %zu)\n",
                 __func__, path, handle->ehdr.e_ehsize, sizeof(handle->ehdr));
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
     // check 5
     if (handle->ehdr.e_phnum == 0) {
         fprintf(stderr, "%s: '%s' has no program headers\n", __func__, path);
-        close(handle->fd);
-        handle->fd = -1;
+        goto err_close;
         return -1;
     }
 
     // tout s'est bien passé
-    fprintf(stderr,
-            "%s: '%s' success "
-            "(%u segment found)\n",
-            __func__, path, handle->ehdr.e_phnum);
+    fprintf(stderr, "%s: '%s' success " "(%u segment found)\n", __func__, path, handle->ehdr.e_phnum);
     return 0;
+
+    err_close: // pour regler 1 warning dans la CI
+        close(handle->fd);
+        handle->fd = -1;
+        return -1;
 }
 
 
