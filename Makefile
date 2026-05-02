@@ -2,33 +2,33 @@
 # Make sure to include this file in your root Makefile (i.e., at the top-level of your repository).
 #
 
-# Répertoire des headers
+# Headers directory
 INCLUDE_DIR = ./include
 
-# Fichiers sources du loader (utilisés par la CI)
+# Loader source files (used by the CI)
 SRC_FILES = ./src/my_dl.c ./src/isos_loader.c ./src/elf_parser.c
 
-# ─── Paramètres de compilation ──────────────────────────────────────────────
+# ─── Compilation settings ──────────────────────────────────────────────
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align \
           -I$(INCLUDE_DIR)
 
-# ─── Cibles ──────────────────────────────────────────────────────────────────
+# ─── Targets ──────────────────────────────────────────────────────────────────
 .PHONY: all clean clang-check
 all: src/libfoo.so isos_loader #src/env_setup
 
-# Compilation de la bibliothèque partagée (modif chall6)
-#on compile la lib avec -Wl,-e,my_symbols pour que e_entry pointe sur notre table de symboles custom
+# Compilation of the shared library (modified for chall6)
+# we compile the lib with -Wl,-e,my_symbols so that e_entry points to our custom symbol table
 src/libfoo.so: src/libfoo.c
 	$(CC) -nostdlib -fPIC -shared -fvisibility=hidden \
 		-Wl,-e,my_symbols \
 		-o $@ $<
 
-# Programme de test de l'environment setup -> casse le chall6 donc commenté
+# Test program for environment setup -> breaks chall6 so commented out
 #src/env_setup: src/env_setup.c src/libfoo.so
 #	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
 
-# Programme principal isos_loader
+# Main program isos_loader
 isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c
 	$(CC) $(CFLAGS) -rdynamic -o $@ $^ -ldl
 

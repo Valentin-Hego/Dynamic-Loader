@@ -13,12 +13,12 @@ struct my_symbol { // custom dynamic symbols table
 };
 
 /*
-    my_dlopen() : ouvre une bibliothèque partagée et retourne un handle
+    my_dlopen() : opens a shared library and returns a handle
 
-    Pour le challenge 2, on :
-      - alloue une structure dl_handle,
-      - ouvre le fichier et valide son en-tête ELF (via elf_open_and_check_ehdr),
-      - retourne le handle à l’appelant (NULL si error).
+    For challenge 2, we:
+      - allocate a dl_handle structure,
+      - open the file and validate its ELF header (via elf_open_and_check_ehdr),
+      - return the handle to the caller (NULL if error).
 */
 void *my_dlopen(const char *path)
 {
@@ -27,7 +27,7 @@ void *my_dlopen(const char *path)
         return NULL;
     }
 
-    // alloue avec notre stucture de handle (-> calloc tous les champs a 0 + sur)
+    // allocate using our handle structure (-> calloc initializes all fields to 0 + safer)
     struct dl_handle *handle = calloc(1, sizeof(*handle));
     if (!handle) {
         fprintf(stderr, "my_dlopen: out of memory\n");
@@ -47,7 +47,7 @@ void *my_dlopen(const char *path)
         return NULL;
     }
 
-    // chall_4 : mapping des segments PT_LOAD en mémoire
+    // chall_4 : mapping PT_LOAD segments into memory
     if (seg_load_mem(handle) < 0) {
         free(handle);
         return NULL;
@@ -60,9 +60,9 @@ void *my_dlopen(const char *path)
     }
 
     /* chall 6 : Call the exported symbols
-    e_entry pour trouver la table des symboles 
+    e_entry to find the symbol table 
      
-    les relocations (chall 5) on deja corrigé les pointeurs name/addr dans my_symbols -> on lis simplement : base_addr + e_entry
+    relocations (chall 5) have already fixed the name/addr pointers in my_symbols -> we simply read: base_addr + e_entry
     */
     if (handle->ehdr.e_entry == 0) {
         fprintf(stderr, "err -> no symbol table\n");
@@ -80,6 +80,7 @@ void *my_dlsym(void *opaque, const char *name)
     if (!opaque || !name)
         return NULL;
 
+    // cast 
     struct dl_handle *h = (struct dl_handle *)opaque;
     struct my_symbol *sym = (struct my_symbol *)h->symtab;
 
@@ -88,7 +89,7 @@ void *my_dlsym(void *opaque, const char *name)
         return NULL;
     }
 
-    //parcour la table my_symbols, compare chaque name, et retourne leurs addr reel apres chargement et relocation
+    // iterate over the my_symbols table, compare each name, and return their real address after loading and relocation
     for (int i = 0; sym[i].name != NULL; i++) {
         if (strcmp(sym[i].name, name) == 0) {
             fprintf(stderr, "my_dlsym: '%s' found at %p\n", name, sym[i].addr);

@@ -7,14 +7,14 @@
 #include <sys/mman.h>
 
 /*
-    Lis le ELF header du fichier et fait les checks du chall_2 :
+    Reads the ELF header from the file and performs the chall_2 checks :
  
     checks :
-    1: Le fichier commence par les octets magiques ELF (\x7fELF)
-    2: Le binaire est en 64 bits (EI_CLASS == ELFCLASS64)
-    3: Le binaire est un objet partagé / une bibliothèque dynamique (e_type == ET_DYN)
-    4: La taille de notre structure Elf64_Ehdr correspond au champ e_ehsize
-    5: Le nombre d’en-têtes de programme (e_phnum) est strictement supérieur à 0
+    1: The file starts with the ELF magic bytes (\x7fELF)
+    2: The binary is 64-bit (EI_CLASS == ELFCLASS64)
+    3: The binary is a shared object / dynamic library (e_type == ET_DYN)
+    4: The size of our Elf64_Ehdr structure matches the e_ehsize field
+    5: The number of program headers (e_phnum) is strictly greater than 0
 */
 int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
@@ -24,7 +24,7 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
         return -1;
     }
 
-    // Lire exactement sizeof(Elf64_Ehdr) octets dans la structure
+    // Read exactly sizeof(Elf64_Ehdr) bytes into the structure
     ssize_t n = read(handle->fd, &handle->ehdr, sizeof(handle->ehdr));
     if (n < 0 || (size_t)n < sizeof(handle->ehdr)) {
         fprintf(stderr, "%s: failed to read ELF header from '%s'\n", __func__, path);
@@ -64,11 +64,11 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
         goto err_close;
     }
 
-    // tout s'est bien passé
+    // everything went well
     fprintf(stderr, "%s: '%s' success " "(%u segment found)\n", __func__, path, handle->ehdr.e_phnum);
     return 0;
 
-    err_close: // pour regler 1 warning dans la CI
+    err_close: // to fix a warning in CI
         close(handle->fd);
         handle->fd = -1;
         return -1;
@@ -77,17 +77,17 @@ int elf_open_and_check_ehdr(const char *path, struct dl_handle *handle){
 
 
 /*
-    Challenge 3 : trouve les segments PT_LOAD et effectue les 4 vérifications.
+    Challenge 3 : find PT_LOAD segments and perform the 4 checks.
  
-    Étapes :
-      1. Vérifier que sizeof(Elf64_Phdr) == handle->ehdr.e_phentsize
-      2. Lire tous les program headers depuis le fichier
-      3. Filtrer les PT_LOAD dans un tableau dynamique
-      4. Check 1 : au moins un PT_LOAD
-      5. Check 2 : le premier PT_LOAD couvre la zone des program headers (p_offset <= e_phoff && p_offset + p_filesz >= e_phoff + phnum * phentsize)
-      6. Check 3 : ordre croissant de p_vaddr
-      7. Check 4 : pas de chevauchement (vaddr[i] + memsz[i] <= vaddr[i+1])
-      8. Calcule mem_size = last.p_vaddr + last.p_memsz - first.p_vaddr
+    Steps :
+      1. Verify that sizeof(Elf64_Phdr) == handle->ehdr.e_phentsize
+      2. Read all program headers from the file
+      3. Filter PT_LOAD into a dynamic array
+      4. Check 1 : at least one PT_LOAD
+      5. Check 2 : the first PT_LOAD covers the program headers area (p_offset <= e_phoff && p_offset + p_filesz >= e_phoff + phnum * phentsize)
+      6. Check 3 : ascending order of p_vaddr
+      7. Check 4 : no overlap (vaddr[i] + memsz[i] <= vaddr[i+1])
+      8. Compute mem_size = last.p_vaddr + last.p_memsz - first.p_vaddr
 */
 int elf_find_load_segments(struct dl_handle *handle){
     Elf64_Ehdr *ehdr = &handle->ehdr;
@@ -99,7 +99,7 @@ int elf_find_load_segments(struct dl_handle *handle){
     }
 
 
-    //allocation d'un tableau pour lire tous les program headers du fichier
+    // allocation of an array to read all program headers from the file
     int nb_segments = ehdr->e_phnum;
     int size_phdr = sizeof(Elf64_Phdr);
     int total_size = nb_segments * size_phdr;
@@ -111,7 +111,7 @@ int elf_find_load_segments(struct dl_handle *handle){
     }
 
 
-    //on place le curseur au bon endroit :
+    // move the cursor to the correct position :
     if (lseek(handle->fd, (off_t)handle->ehdr.e_phoff, SEEK_SET) < 0) {
         fprintf(stderr, "%s: cursor positionning error\n", __func__);
         free(all_phdrs);
@@ -125,7 +125,7 @@ int elf_find_load_segments(struct dl_handle *handle){
         return -1;
     }
 
-    //parcourir tous les segments et ne garder que les PT_LOAD
+    // iterate through all segments and keep only PT_LOAD
     Elf64_Phdr *load_segs = malloc(nb_segments * size_phdr);
     if (load_segs == NULL){
         fprintf(stderr, "%s: failed allocation\n", __func__);
@@ -133,26 +133,26 @@ int elf_find_load_segments(struct dl_handle *handle){
         return -1;
     }
 
-    size_t load_count = 0; //nb de PT_LOAD trouvés
+    size_t load_count = 0; // number of PT_LOAD found
     
     for (int i = 0; i < nb_segments; i++) {
         if (all_phdrs[i].p_type == PT_LOAD) {
-            load_segs[load_count] = all_phdrs[i]; // copie du segment
+            load_segs[load_count] = all_phdrs[i]; // segment copy
             load_count++;
         }
     }
     free(all_phdrs);
     
     
-    //check : The DL library has at least one load segment.
+    // check : The DL library has at least one load segment.
     if(load_count == 0){
         fprintf(stderr, "%s: no PT_LOAD segment found\n", __func__);
         free(load_segs);
         return -1;
     }
 
-    //check : The first load segment spans over all segment headers.
-    // p_offset <= e_phoff  ET  p_offset + p_filesz >= e_phoff + (phnum * phentsize)
+    // check : The first load segment spans over all segment headers.
+    // p_offset <= e_phoff  AND  p_offset + p_filesz >= e_phoff + (phnum * phentsize)
     uint64_t ph_table_start = ehdr->e_phoff;
     uint64_t ph_table_end   = ehdr->e_phoff + (uint64_t)ehdr->e_phnum * ehdr->e_phentsize;
     uint64_t seg0_start     = load_segs[0].p_offset;
@@ -166,7 +166,7 @@ int elf_find_load_segments(struct dl_handle *handle){
     }
 
 
-    //check : The PT_LOAD segments are in ascending order of p_vaddr. 
+    // check : The PT_LOAD segments are in ascending order of p_vaddr. 
     for (size_t i = 1; i < load_count; i++) {
         if (load_segs[i].p_vaddr <= load_segs[i - 1].p_vaddr) {
             fprintf(stderr, "%s: PT_LOAD segments are not in ascending order of p_vaddr\n", __func__);
@@ -176,21 +176,21 @@ int elf_find_load_segments(struct dl_handle *handle){
     }    
 
 
-    //check : The PT_LOAD segments do not overlap.
+    // check : The PT_LOAD segments do not overlap.
     for (size_t i = 0; i + 1 < load_count; i++) {
         uint64_t end_i = load_segs[i].p_vaddr + load_segs[i].p_memsz;
         if (end_i > load_segs[i + 1].p_vaddr) {
-            fprintf(stderr, "%s: deux segments PT_LOAD se chevauchent en mémoire\n", __func__);            
+            fprintf(stderr, "%s: two PT_LOAD segments overlap in memory\n", __func__);            
             free(load_segs);
             return -1;
         }
     }
 
 
-    //Compute the total memory size between the first PT_LOAD and the end of the last PT_LOAD
+    // Compute the total memory size between the first PT_LOAD and the end of the last PT_LOAD
     uint64_t mem_size = (load_segs[load_count - 1].p_vaddr + load_segs[load_count - 1].p_memsz) - load_segs[0].p_vaddr;
 
-    //les results -> dans le handle
+    // results -> stored in the handle
     handle->load_segs  = load_segs;
     handle->load_count = load_count;
     handle->mem_size   = mem_size;
@@ -203,9 +203,9 @@ int elf_find_load_segments(struct dl_handle *handle){
 
 
 /*
-    Charge les segments PT_LOAD d'un ELF en mémoire.
-    On réserve d'abord toute la plage pour garantir la contiguïté,
-    puis on "écrase" les zones avec les mappings du fichier.
+    Loads PT_LOAD segments of an ELF into memory.
+    We first reserve the entire range to guarantee contiguity,
+    then we "overwrite" regions with file mappings.
 */
  int seg_load_mem(struct dl_handle *h) {
 
@@ -213,31 +213,31 @@ int elf_find_load_segments(struct dl_handle *handle){
         return -1;
     }
     
-    //taille d'une page -> en général = 4096
+    // page size -> usually = 4096
     size_t psz = (size_t)sysconf(_SC_PAGESIZE);
-    // arrondi au multiple de page supérieur
-    // mmap exige nb entiers de page et pages allignées
+    // round up to the next page multiple
+    // mmap requires full pages and aligned pages
     size_t total = (h->mem_size + psz - 1) & ~(psz - 1);
 
 
-    // Réservation initiale on prend toute la place d'un coup
+    // initial reservation: allocate everything at once
     void *map = mmap((void *)0x00, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (map == MAP_FAILED) {
         perror("mmap_reserve");
         return -1;
     }
  
-    // différence entre l'adresse virtuelle ELF et l'adresse réelle
+    // difference between ELF virtual address and real address
     h->base_addr = (char *)map - h->load_segs[0].p_vaddr;
     fprintf(stderr, "%s: reserved %zu bytes at %p, base_addr=%p\n", __func__, total, map, h->base_addr);
  
-    // boucle 1 : mappe chaque segment depuis le fichier
+    // loop 1 : map each segment from the file
     for (size_t i = 0; i < h->load_count; i++) {
         Elf64_Phdr *s = &h->load_segs[i];
  
-        // alignement sur les pages
-        uintptr_t align_off = s->p_vaddr % psz; //l'exces potentiel 
-        void *addr = (char *)h->base_addr + (s->p_vaddr - align_off); //on recule l'addresse 
+        // page alignment
+        uintptr_t align_off = s->p_vaddr % psz; // possible excess 
+        void *addr = (char *)h->base_addr + (s->p_vaddr - align_off); // move address backward 
         size_t len = s->p_filesz + align_off;
         off_t offset = (off_t)(s->p_offset - align_off);
  
@@ -247,16 +247,16 @@ int elf_find_load_segments(struct dl_handle *handle){
         }
         fprintf(stderr, "%s: segment %zu mapped at %p (filesz=0x%lx, memsz=0x%lx)\n", __func__, i, (char *)h->base_addr + s->p_vaddr, (unsigned long)s->p_filesz, (unsigned long)s->p_memsz);
  
-        // nettoyage de la zone du BSS
-        if (s->p_memsz > s->p_filesz) { //si la mem reservée est plus grande que ce que l'on a besoin
-            void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz; //là que BSS commence
-            memset(bss_ptr, 0, s->p_memsz - s->p_filesz); //rempli la fin de 0 pour eviter le garbage
+        // clean up BSS area
+        if (s->p_memsz > s->p_filesz) {
+            void *bss_ptr = (char *)h->base_addr + s->p_vaddr + s->p_filesz; // where BSS starts
+            memset(bss_ptr, 0, s->p_memsz - s->p_filesz); // zero-fill to avoid garbage
             fprintf(stderr, "%s: BSS zeroed at %p (%zu bytes)\n", __func__, bss_ptr, s->p_memsz - s->p_filesz);
         }
     }
  
-    // boucle 2 : appliquer les vraies permissions avec mprotect
-    // longueur basée sur p_memsz pour couvrir la BSS
+    // loop 2 : apply real permissions with mprotect
+    // length based on p_memsz to cover BSS
     for (size_t i = 0; i < h->load_count; i++) {
         Elf64_Phdr *s = &h->load_segs[i];
  
@@ -289,8 +289,8 @@ int elf_find_load_segments(struct dl_handle *handle){
 
 /*
     Challenge 5 : Dynamic relocations
-    Le but est de corriger les adresses dans le binaire chargé car il n'est pas 
-    à son adresse de base prévue à la compilation.
+    The goal is to fix addresses in the loaded binary since it is not
+    at its original base address defined at compile time.
 */
 int relocations(struct dl_handle *handle) {
     Elf64_Dyn *dyn_table = NULL;
@@ -298,7 +298,7 @@ int relocations(struct dl_handle *handle) {
     size_t rela_size = 0;
     size_t rela_ent_size = 0;
 
-    // trouver le segment dynamic
+    // find the dynamic segment
     Elf64_Phdr *phdrs = (Elf64_Phdr *)((char *)handle->base_addr + handle->ehdr.e_phoff);
     for (int i = 0; i < handle->ehdr.e_phnum; i++) {
         if (phdrs[i].p_type == PT_DYNAMIC) {
@@ -307,11 +307,11 @@ int relocations(struct dl_handle *handle) {
         }
     }
 
-    // si aucune var glob ou dépendances raf (rien à faire)
+    // if no global vars or dependencies (nothing to do)
     if (dyn_table == NULL)
         return 0;
 
-    // recherche les entrées RELA dans la table dynamique
+    // search RELA entries in the dynamic table
     for (int i = 0; dyn_table[i].d_tag != DT_NULL; i++) {
         if (dyn_table[i].d_tag == DT_RELA)
             rela_table = (Elf64_Rela *)((char *)handle->base_addr + dyn_table[i].d_un.d_ptr);
@@ -327,20 +327,20 @@ int relocations(struct dl_handle *handle) {
     int num_relocs = (int)(rela_size / rela_ent_size);
     long psz = sysconf(_SC_PAGESIZE);
 
-    // boucle sur toutes les entrées
+    // loop over all entries
     for (int i = 0; i < num_relocs; i++) {
         Elf64_Rela *curr = (Elf64_Rela *)((char *)rela_table + (i * rela_ent_size));
-        uint32_t type = ELF64_R_TYPE(curr->r_info); // dans sujet les rela peuvent etres soit R_X86_64_RELATIVE soit R_X86_64_RELATIVE (oublie chall 5)
+        uint32_t type = ELF64_R_TYPE(curr->r_info); // in subject, rela can be R_X86_64_RELATIVE or R_X86_64_64
 
-        void *target_addr = (char *)handle->base_addr + curr->r_offset; //l'addr a corriger
+        void *target_addr = (char *)handle->base_addr + curr->r_offset; // address to fix
         uint64_t final_val = 0;
 
-        if (type == R_X86_64_RELATIVE || type == R_X86_64_64) { //chall5 oublie du ou -> pb au chall6
-            // adresse = base + addend 
-            final_val = (uint64_t)handle->base_addr + (uint64_t)curr->r_addend; //la corrextion
+        if (type == R_X86_64_RELATIVE || type == R_X86_64_64) {
+            // address = base + addend 
+            final_val = (uint64_t)handle->base_addr + (uint64_t)curr->r_addend; // correction
         }
 
-        // mprotect temporaire si la page n'est pas writable
+        // temporary mprotect if the page is not writable
         int modif_prot = 0;
         int orig_prot  = PROT_READ | PROT_WRITE;
 
@@ -350,28 +350,28 @@ int relocations(struct dl_handle *handle) {
             void *seg_end   = (char *)seg_start + seg->p_memsz;
 
             if (target_addr >= seg_start && target_addr < seg_end) {
-                // reconstruire le prot d'origine
+                // reconstruct original prot
                 orig_prot = ((seg->p_flags & PF_R) ? PROT_READ  : 0) |
                             ((seg->p_flags & PF_W) ? PROT_WRITE : 0) |
                             ((seg->p_flags & PF_X) ? PROT_EXEC  : 0);
-                // mprotect seulement si le segment n'est pas déjà writable            
+                // mprotect only if segment is not already writable            
                 if (!(seg->p_flags & PF_W))
                     modif_prot = 1;
                 break;
             }
         }
 
-        // meme principe que chall 4 mprotect travaille par pages
+        // same principle as chall 4: mprotect works per page
         uintptr_t page_start = (uintptr_t)target_addr & ~((uintptr_t)psz - 1);
         if (mprotect((void *)page_start, (size_t)psz, PROT_READ | PROT_WRITE) < 0) {
             perror("mprotect (reloc start)");
             return -1;
         }
         
-        // on applique la relocation
+        // apply relocation
         *(uint64_t *)target_addr = final_val;
 
-        // restaure les permissions d'origine si le segment était read-only
+        // restore original permissions if the segment was read-only
         if (modif_prot) {
             if (mprotect((void *)page_start, (size_t)psz, orig_prot) < 0) {
                 perror("mprotect (reloc restore)");

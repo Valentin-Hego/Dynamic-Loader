@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 
-//options d'argp
+// argp options
 const char *argp_program_version = "isos_loader chall 6.0";
 const char *argp_program_bug_address = "<valentin.hego@univ-rennes.fr>";
 
@@ -25,23 +25,23 @@ struct arguments {
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state)
 {
-    struct arguments *args = state->input; //state = structure que argp donne pendant le parsing, elle contien tout le contexte du parsing
+    struct arguments *args = state->input; // state = structure provided by argp during parsing, it contains all parsing context
 
     switch (key) {
     case ARGP_KEY_ARG:
-        if (state->arg_num == 0) { //champs de state num de l'arg (positionel) courant
+        if (state->arg_num == 0) { // state field: current positional argument index
             args->library = arg;
         } else if (state->arg_num == 1) {
-            // pointe sur le debut de la liste des fonctions et consomme tout le reste des arguments d'un coup
-            args->functions = &state->argv[state->next - 1]; //champs de state tableau complet des tous les arguments
+            // points to the beginning of the function list and consumes all remaining arguments at once
+            args->functions = &state->argv[state->next - 1]; // state field: full array of all arguments
             args->nfunctions = state->argc - (int)(state->next - 1);
             state->next = state->argc;
         }
         break;
 
     case ARGP_KEY_END:
-        if (state->arg_num < 2) //2 car on attend -> ./isos_loader LIBRARY FUNC
-            argp_usage(state); //affiche le message d'usage
+        if (state->arg_num < 2) // 2 because we expect -> ./isos_loader LIBRARY FUNC
+            argp_usage(state); // displays usage message
         break;
 
     default:
@@ -64,14 +64,14 @@ int main(int argc, char *argv[])
     for (int i = 0; i < args.nfunctions; i++) {
         const char *fname = args.functions[i];
 
-        void *sym = my_dlsym(handle, fname); // adresse en mémoire de la fonction dans le .so
+        void *sym = my_dlsym(handle, fname); // memory address of the function in the .so
         if (!sym) {
             fprintf(stderr, "symbol '%s' not found\n", fname);
             continue;
         }
 
-        /* fn deviens un pointeur vers la vraie fonction et on peut l'appeler comme une fonction classigua : fn()
-        * puis appel direct et affichage du résultat */
+        /* fn becomes a pointer to the actual function and can be called like a regular function: fn()
+         * then direct call and display of the result */
         const char *(*fn)(void) = (const char *(*)(void))sym;
         printf("[%s] => %s\n", fname, fn());
     }
