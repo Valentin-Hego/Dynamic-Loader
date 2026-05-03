@@ -1,6 +1,5 @@
 # This Makefile is for the ISOS project and ensure compatibility with the CI.
 # Make sure to include this file in your root Makefile (i.e., at the top-level of your repository).
-#
 
 # Headers directory
 INCLUDE_DIR = ./include
@@ -15,7 +14,8 @@ CFLAGS  = -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align
 
 # ─── Targets ──────────────────────────────────────────────────────────────────
 .PHONY: all clean clang-check
-all: src/libfoo.so isos_loader #src/env_setup
+all: encrypt src/libfoo.so isos_loader
+
 
 # Compilation of the shared library (modified for chall6)
 # we compile the lib with -Wl,-e,my_symbols so that e_entry points to our custom symbol table
@@ -24,17 +24,22 @@ src/libfoo.so: src/libfoo.c
 		-Wl,-e,my_symbols \
 		-o $@ $<
 
-# Test program for environment setup -> breaks chall6 so commented out
-#src/env_setup: src/env_setup.c src/libfoo.so
-#	$(CC) $(CFLAGS) -o $@ $< -Lsrc -lfoo -Wl,-rpath,$(PWD)/src
+# bonus 2 encryption tool
+encrypt: src/encrypt.c
+	$(CC) -Wall -Wextra -o $@ $<
 
 # Main program isos_loader
-isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c
-	$(CC) $(CFLAGS) -rdynamic -o $@ $^ -ldl
+# compile normaly, then inject (at the end) the encrypted
+isos_loader: src/isos_loader.c src/my_dl.c src/elf_parser.c src/libfoo.so encrypt
+	$(CC) $(CFLAGS) -rdynamic -o $@ src/isos_loader.c src/my_dl.c src/elf_parser.c -ldl
+	@echo "-----bonus 2 (encryption)--------"
+	./encrypt src/libfoo.so src/encrypted.so
+	cat src/encrypted.so >> $@ 
 
 # Clang
 clang-check:
 	clang -Wall -Wextra -Wuninitialized -Wpointer-arith -Wcast-qual -Wcast-align \
 	-I$(INCLUDE_DIR) -rdynamic --analyze $(SRC_FILES) -ldl
+
 clean:
-	rm -f src/libfoo.so src/env_setup isos_loader
+	rm -f src/libfoo.so isos_loader encrypt src/encrypted.so src/encrypt
